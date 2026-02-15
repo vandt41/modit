@@ -1,2 +1,7 @@
-vendored/
 build/
+*.o
+*.out
+*.exe
+*.a
+*.so
+compile_commands.json
