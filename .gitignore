@@ -5,3 +5,4 @@ build/
 *.a
 *.so
 compile_commands.json
+.vscode
