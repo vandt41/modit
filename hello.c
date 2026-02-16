@@ -118,7 +118,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
   // Render all lines of text using SDL_ttf
   int y_offset = OFFSET_Y;
-
+  int x_offset;
   for (int i = 0; i <= current_line; i++) {
     if (buffer[i][0] != '\0') { // Only render non-empty lines
       SDL_Color white = {255, 255, 255, 255};
@@ -156,9 +156,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
 
     // Calculate cursor position (rough estimate)
-    int cursor_x = OFFSET_X + (current_col *
-                               (FONT_SIZE / 2)); // Approximate width per char
-    int cursor_y = OFFSET_Y + (current_line * (FONT_SIZE + 4));
+    int cursor_x = FONT_SIZE * (current_col + OFFSET_X);
+    int cursor_y = y_offset - FONT_SIZE;
 
     SDL_FRect cursor = {cursor_x, cursor_y, 2, FONT_SIZE};
     SDL_RenderFillRect(renderer, &cursor);
