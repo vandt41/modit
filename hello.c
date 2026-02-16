@@ -1,85 +1,179 @@
-#include <SDL3/SDL_events.h>
-#include <SDL3/SDL_keyboard.h>
-#include <SDL3/SDL_log.h>
-#include <SDL3/SDL_oldnames.h>
-#include <SDL3/SDL_scancode.h>
-#include <stdbool.h>
-#define SDL_MAIN_USE_CALLBACKS 1 /* use the callbacks instead of main() */
+#define SDL_MAIN_USE_CALLBACKS 1
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <SDL3_ttf/SDL_ttf.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
-#define ROWS 32
+#define MAX_LINES 1024
+#define MAX_LINE_LENGTH 1024
+#define FONT_SIZE 20
+#define OFFSET_Y 20
+#define OFFSET_X 10
 
-/* We will use this renderer to draw into this window every frame. */
+/* Global state */
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
-static int text_begin = 0;
-static int *buffer_start = NULL;
-static int buffer_end = 0;
-static int *text_end = NULL;
-int line = 0;
+static TTF_Font *font = NULL; // Make font global
+static char buffer[MAX_LINES][MAX_LINE_LENGTH];
+static int current_line = 0;
+static int current_col = 0;
+
 /* This function runs once at startup. */
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
-  SDL_SetAppMetadata("text editor", "1.0", "com.example.CATEGORY-NAME");
+  SDL_SetAppMetadata("text editor", "1.0", "com.example.texteditor");
+
+  // Initialize all lines to empty
+  for (int i = 0; i < MAX_LINES; i++) {
+    buffer[i][0] = '\0';
+  }
+
+  // Set initial text
+  strcpy(buffer[current_line++], "Text under here!");
 
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
     return SDL_APP_FAILURE;
   }
 
-  if (!SDL_CreateWindowAndRenderer("text editor", 640, 480,
+  if (!SDL_CreateWindowAndRenderer("text editor", 800, 600,
                                    SDL_WINDOW_RESIZABLE, &window, &renderer)) {
     SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
     return SDL_APP_FAILURE;
   }
-  SDL_SetRenderLogicalPresentation(renderer, 640, 480,
-                                   SDL_LOGICAL_PRESENTATION_LETTERBOX);
 
-  return SDL_APP_CONTINUE; /* carry on with the program! */
+  if (!TTF_Init()) {
+    SDL_Log("TTF_Init Error: %s", SDL_GetError());
+    return SDL_APP_FAILURE;
+  }
+
+  // Load font (make it global)
+  font = TTF_OpenFont(
+      "/usr/local/share/fonts/JetBrainsMono/JetBrainsMonoNerdFont-Regular.ttf",
+      FONT_SIZE);
+  if (!font) {
+    SDL_Log("Couldn't initialize font: %s", SDL_GetError());
+    return SDL_APP_FAILURE;
+  }
+
+  if (!SDL_StartTextInput(window)) {
+    SDL_Log("Couldn't start text input: %s", SDL_GetError());
+    return SDL_APP_FAILURE;
+  }
+
+  return SDL_APP_CONTINUE;
 }
-
-static char editor_buffer[1024] = "Type something...";
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
   if (event->type == SDL_EVENT_QUIT) {
     return SDL_APP_SUCCESS;
   }
 
-  // Catch actual text characters
   else if (event->type == SDL_EVENT_KEY_DOWN) {
-    const char key = event->key.key;
+    switch (event->key.key) {
+    case SDLK_RETURN:
+      SDL_Log("Enter pressed!");
+      current_line++;
+      current_col = 0;
+      if (current_line >= MAX_LINES) {
+        current_line = MAX_LINES - 1; // Prevent overflow
+      }
+      break;
 
-    int length = strlen(editor_buffer);
+    case SDLK_BACKSPACE:
+      if (current_col > 0) {
+        // Remove last character
+        int len = strlen(buffer[current_line]);
+        if (len > 0) {
+          buffer[current_line][len - 1] = '\0';
+          current_col--;
+        }
+      }
+      break;
+    }
+  }
+  // Catch actual text characters
+  else if (event->type == SDL_EVENT_TEXT_INPUT) {
+    const char *input = event->text.text;
+    int current_len = strlen(buffer[current_line]);
 
-    if (length < sizeof(editor_buffer) - 1) {
-      editor_buffer[length] = key;      // Place char at the end
-      editor_buffer[length + 1] = '\0'; // Manually re-terminate
+    // Check if we have space
+    if (current_len + strlen(input) < MAX_LINE_LENGTH - 1) {
+      strcat(buffer[current_line], input);
+      current_col += strlen(input);
     }
-    if (length >= 20) {
-      line++;
-    }
-    SDL_Log("Buffer is now: %s", editor_buffer);
+
+    SDL_Log("Line %d: '%s'", current_line, buffer[current_line]);
   }
 
   return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
-  // 1. Clear Screen
+  // Clear screen
   SDL_SetRenderDrawColor(renderer, 33, 33, 33, 255);
   SDL_RenderClear(renderer);
 
-  // 2. Render Text
-  // Note: SDL_RenderDebugText uses grid coordinates, not pixels.
-  SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-  SDL_RenderDebugText(renderer, 0, line, editor_buffer);
+  // Render all lines of text using SDL_ttf
+  int y_offset = OFFSET_Y;
 
-  // 3. Present
+  for (int i = 0; i <= current_line; i++) {
+    if (buffer[i][0] != '\0') { // Only render non-empty lines
+      SDL_Color white = {255, 255, 255, 255};
+
+      // Render text to surface
+      SDL_Surface *surface =
+          TTF_RenderText_Blended(font, buffer[i], strlen(buffer[i]), white);
+      if (surface) {
+        // Convert surface to texture
+        SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+        if (texture) {
+          // Get texture dimensions
+          float w, h;
+          SDL_GetTextureSize(texture, &w, &h);
+
+          // Set destination rectangle
+          SDL_FRect dst_rect = {OFFSET_X, (float)y_offset, w, h};
+
+          // Render the texture
+          SDL_RenderTexture(renderer, texture, NULL, &dst_rect);
+
+          // Cleanup
+          SDL_DestroyTexture(texture);
+        }
+        SDL_DestroySurface(surface);
+      }
+
+      // Move to next line position
+      y_offset += FONT_SIZE + 4;
+    }
+  }
+
+  // Simple cursor rendering (just a visual indicator)
+  if (SDL_GetTicks() % 1000 < 500) { // Blink every 500ms
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+
+    // Calculate cursor position (rough estimate)
+    int cursor_x = OFFSET_X + (current_col *
+                               (FONT_SIZE / 2)); // Approximate width per char
+    int cursor_y = OFFSET_Y + (current_line * (FONT_SIZE + 4));
+
+    SDL_FRect cursor = {cursor_x, cursor_y, 2, FONT_SIZE};
+    SDL_RenderFillRect(renderer, &cursor);
+  }
+
+  // Present
   SDL_RenderPresent(renderer);
   return SDL_APP_CONTINUE;
 }
-/* This function runs once at shutdown. */
+
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
-  /* SDL will clean up the window/renderer for us. */
+  SDL_StopTextInput(window);
+  if (font) {
+    TTF_CloseFont(font);
+  }
+  TTF_Quit();
+  // SDL will clean up the window/renderer for us
 }
